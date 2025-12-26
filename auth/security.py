@@ -8,8 +8,6 @@ from sqlalchemy.orm import Session
 # Importy Twoich modułów (dostosuj ścieżki jeśli trzeba)
 from db import SessionLocal
 import models.User as models
-
-
 from  db import get_db
 
 
