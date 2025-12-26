@@ -2,8 +2,13 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 import schemas
 from  db import get_db
+
+import models.Solution as models_s
 from models.User import User
+from models.PuzzleType import PuzzleType
 from auth.security import hash_password, verify_password, create_access_token
+from security import get_current_user, admin_required
+import models.Puzzle as models_p
 
 app = FastAPI()
 
@@ -38,3 +43,36 @@ def login(user_in: schemas.UserLogin, database: Session = Depends(get_db)):
     
     token = create_access_token(data={"sub": user.email, "role": user.role})
     return {"access_token": token, "token_type": "bearer"}
+
+import models.Solution as models_s
+from models.PuzzleType import PuzzleType
+
+@app.get("/story/next")
+def get_next_story_puzzle(database: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    # 1. Pobierz ID wszystkich rozwiązanych zagadek przez tego użytkownika
+    solved_ids = database.query(models_s.Solution.puzzle_id).filter(
+        models_s.Solution.user_id == current_user.id
+    ).all()
+    solved_ids_list = [r[0] for r in solved_ids]
+
+    # 2. Znajdź pierwszą zagadkę typu STORY, której nie ma w rozwiązanych
+    next_puzzle = database.query(models_p.Puzzle).filter(
+        models_p.Puzzle.type == PuzzleType.STORY,
+        ~models_p.Puzzle.id.in_(solved_ids_list)
+    ).order_by(models_p.Puzzle.id.asc()).first()
+
+    if not next_puzzle:
+        return {"message": "Gratulacje! Rozwiązałeś wszystkie zagadki story mode."}
+    
+    return next_puzzle
+
+# Endpoint dostępny dla każdego zalogowanego
+@app.get("/auth/me")
+def read_users_me(current_user = Depends(get_current_user)):
+    return current_user
+
+# Endpoint CRUD dostępny TYLKO dla admina
+@app.post("/puzzles")
+def add_puzzle(puzzle: schemas.PuzzleCreate, admin = Depends(admin_required)):
+    # Jeśli kod tu dotrze, mamy pewność, że to admin
+    return {"status": "added by admin"}
