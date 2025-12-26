@@ -5,6 +5,18 @@ from sqlalchemy import pool
 
 from alembic import context
 
+import sys
+import os
+sys.path.insert(0, os.path.realpath(os.path.join(os.path.dirname(__file__), '..')))
+
+from db import Base 
+from models.User import User
+from models.Puzzle import Puzzle
+from models.Solution import Solution
+from models.Ranking import Ranking
+from models.models import HintLog
+from models.DailyPuzzle import DailyPuzzle
+
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
@@ -18,7 +30,8 @@ if config.config_file_name is not None:
 # for 'autogenerate' support
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
-target_metadata = None
+target_metadata = Base.metadata
+
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
