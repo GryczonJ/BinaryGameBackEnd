@@ -1,6 +1,7 @@
 from pydantic import BaseModel, EmailStr
 from typing import Optional
-from models.enums import PuzzleType
+from models.PuzzleType import PuzzleType
+from pydantic import BaseModel, EmailStr
 
 # Schematy dla Auth
 class UserCreate(BaseModel):

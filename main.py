@@ -1,17 +1,11 @@
 from fastapi import FastAPI, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-import schemas, db
+import schemas
+from  db import get_db
 from models.User import User
 from auth.security import hash_password, verify_password, create_access_token
 
 app = FastAPI()
-
-def get_db():
-    session = db.SessionLocal()
-    try:
-        yield session
-    finally:
-        session.close()
 
 @app.post("/auth/register", response_model=schemas.Token)
 def register(user_in: schemas.UserCreate, database: Session = Depends(get_db)):
