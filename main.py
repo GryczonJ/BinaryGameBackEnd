@@ -66,12 +66,10 @@ def get_next_story_puzzle(database: Session = Depends(get_db), current_user = De
     
     return next_puzzle
 
-# Endpoint dostępny dla każdego zalogowanego
 @app.get("/auth/me")
 def read_users_me(current_user = Depends(get_current_user)):
     return current_user
 
-# Endpoint CRUD dostępny TYLKO dla admina
 @app.post("/puzzles")
 def add_puzzle(puzzle: schemas.PuzzleCreate, admin = Depends(admin_required)):
     # Jeśli kod tu dotrze, mamy pewność, że to admin

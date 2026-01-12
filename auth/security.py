@@ -6,9 +6,8 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
 # Importy Twoich modułów (dostosuj ścieżki jeśli trzeba)
-from db import SessionLocal
+from db import SessionLocal, get_db
 import models.User as models
-from  db import get_db
 
 
 SECRET_KEY = "TWOJ_BARDZO_TAJNY_KLUCZ_DO_JWT"
@@ -17,15 +16,6 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
-
-
-
-# To powinno być w zmiennych środowiskowych!
-SECRET_KEY = "TWOJ_BARDZO_TAJNY_KLUCZ_DO_JWT"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 godziny
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
