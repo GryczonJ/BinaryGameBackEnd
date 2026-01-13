@@ -6,9 +6,11 @@ from  db import get_db
 import models.Solution as models_s
 from models.User import User
 from models.PuzzleType import PuzzleType
-from auth.security import hash_password, verify_password, create_access_token
-from security import get_current_user, admin_required
+#from auth.security import hash_password, verify_password, create_access_token
+#from security import get_current_user, admin_required
 import models.Puzzle as models_p
+from auth.security import get_current_user, admin_required
+
 
 app = FastAPI()
 

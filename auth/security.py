@@ -4,10 +4,11 @@ from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
+from models.User import User
 
-# Importy Twoich modułów (dostosuj ścieżki jeśli trzeba)
+
 from db import SessionLocal, get_db
-import models.User as models
+
 
 
 SECRET_KEY = "TWOJ_BARDZO_TAJNY_KLUCZ_DO_JWT"
@@ -30,15 +31,16 @@ def create_access_token(data: dict):
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
-    """
-    Dekoduje token JWT, sprawdza poprawność i wyciąga użytkownika z bazy.
-    """
+def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db)
+):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Nie można zweryfikować tokenu dostępu",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         email: str = payload.get("sub")
@@ -47,15 +49,14 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     except JWTError:
         raise credentials_exception
 
-    user = db.query(models.User).filter(models.User.email == email).first()
+    user = db.query(User).filter(User.email == email).first()
     if user is None:
         raise credentials_exception
+
     return user
 
-def admin_required(current_user: models.User = Depends(get_current_user)):
-    """
-    Sprawdza, czy zalogowany użytkownik ma rolę admina.
-    """
+
+def admin_required(current_user: User = Depends(get_current_user)):
     if current_user.role != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
