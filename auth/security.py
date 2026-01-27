@@ -1,64 +1,67 @@
-from datetime import datetime, timedelta, timezone
-from jose import jwt, JWTError
-from passlib.context import CryptContext
+from datetime import datetime, timedelta
+import secrets
+import bcrypt
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
-# Importy Twoich modułów (dostosuj ścieżki jeśli trzeba)
-from db import SessionLocal, get_db
-import models.User as models
+from db import get_db
+from models import User, Session as DbSession
 
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
-SECRET_KEY = "TWOJ_BARDZO_TAJNY_KLUCZ_DO_JWT"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
-
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
-
-def create_access_token(data: dict):
-    to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    """Hash a password using bcrypt."""
+    # Convert password to bytes
+    password_bytes = password.encode('utf-8')
+    # Generate salt and hash
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(password_bytes, salt)
+    # Return as string
+    return hashed.decode('utf-8')
 
 
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
-    """
-    Dekoduje token JWT, sprawdza poprawność i wyciąga użytkownika z bazy.
-    """
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Nie można zweryfikować tokenu dostępu",
-        headers={"WWW-Authenticate": "Bearer"},
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verify a password against a bcrypt hash."""
+    password_bytes = plain_password.encode('utf-8')
+    hashed_bytes = hashed_password.encode('utf-8')
+    return bcrypt.checkpw(password_bytes, hashed_bytes)
+
+def new_session_token() -> str:
+    return secrets.token_urlsafe(32)
+
+def create_session(db: Session, user: User, days: int = 30) -> str:
+    token = new_session_token()
+    expires_at = datetime.utcnow() + timedelta(days=days)
+
+    s = DbSession(
+        user_id=user.id,
+        token=token,
+        expires_at=expires_at
     )
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        if email is None:
-            raise credentials_exception
-    except JWTError:
-        raise credentials_exception
+    db.add(s)
+    db.commit()
+    return token
 
-    user = db.query(models.User).filter(models.User.email == email).first()
-    if user is None:
-        raise credentials_exception
-    return user
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
+    now = datetime.utcnow()
 
-def admin_required(current_user: models.User = Depends(get_current_user)):
-    """
-    Sprawdza, czy zalogowany użytkownik ma rolę admina.
-    """
-    if current_user.role != "admin":
+    sess = db.query(DbSession).filter(
+        DbSession.token == token,
+        DbSession.expires_at > now
+    ).first()
+
+    if not sess:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Brak uprawnień administratora"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired session token",
+            headers={"WWW-Authenticate": "Bearer"},
         )
-    return current_user
+
+    user = db.query(User).filter(User.id == sess.user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    return user

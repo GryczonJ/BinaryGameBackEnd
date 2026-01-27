@@ -1,23 +1,19 @@
-# Importujemy Base, aby był dostępny jako models.Base
+# Importujemy Base, aby byl dostepny jako models.Base
 from db import Base
 
-# Importujemy wszystkie klasy modeli, aby SQLAlchemy zarejestrowało je w Base.metadata
-from .PuzzleType import PuzzleType
-from .User import User
-from .Puzzle import Puzzle
-from .Solution import Solution
-from .Ranking import Ranking
-from .models import HintLog
-from .DailyPuzzle import DailyPuzzle
+# Importujemy wszystkie klasy modeli z models.py
+from .models import User, Session, Puzzle, StoryPuzzle, DailyPuzzle, Solve, DailyRanking, AiHint
 
 
-# Opcjonalnie: definiujemy co ma być dostępne przy "from models import *"
+# Opcjonalnie: definiujemy co ma byc dostepne przy "from models import *"
 __all__ = [
     "Base",
     "User",
+    "Session",
     "Puzzle",
-    "Solution",
-    "Ranking",
-    "HintLog",
-    "DailyPuzzle"
+    "StoryPuzzle",
+    "DailyPuzzle",
+    "Solve",
+    "DailyRanking",
+    "AiHint"
 ]
