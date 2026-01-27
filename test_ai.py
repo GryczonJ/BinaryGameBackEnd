@@ -13,7 +13,7 @@ from ai_model import generate_hint_text
 
 def main():
     # Set your model path here or via AI_MODEL_PATH env var
-    model_path = os.getenv("AI_MODEL_PATH", "./models/gemma-2-2b-it-Q4_K_M.gguf")
+    model_path = os.getenv("AI_MODEL_PATH", "./model/gemma-2-2b-it-Q4_K_M.gguf")
     print(f"Using model path: {model_path}")
 
     # Example 6x6 puzzle grid (None means empty)
@@ -25,7 +25,7 @@ def main():
         [0,     None,   1,      None,   None,   None],
         [None,  None,   1,      1,      0,      1],
     ]
-    grid = [
+    grid2 = [
         [0,     None,   None,   None,   0,      None],
         [None,  None,   None,   None,   None,   None],
         [None,  None,   None,   0,      None,   None],

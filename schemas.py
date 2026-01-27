@@ -154,6 +154,17 @@ class AiHintResponse(BaseModel):
 
 
 # ==================== ADMIN SCHEMAS ====================
+class AiErrorResponse(BaseModel):
+    grid_state: str  # JSON string of current grid state
+    errors: list  # Flexible error list - can be any structure
+
+
+class AiErrorFeedback(BaseModel):
+    message: str
+    errors_corrected: int
+
+
+# ==================== ADMIN SCHEMAS ====================
 class DailyPuzzleAssign(BaseModel):
     puzzle_id: UUID
 

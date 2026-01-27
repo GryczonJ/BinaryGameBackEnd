@@ -7,7 +7,7 @@ from db import get_db
 import schemas
 from models.models import User, Puzzle, AiHint
 from auth.security import get_current_user
-from ai_model import generate_hint_text
+from ai_model import generate_hint_text, generate_error_feedback
 
 router = APIRouter()
 
@@ -136,43 +136,78 @@ def get_hint(
     """
     # DISABLED FOR PRESENTATION - use first user
     current_user = db.query(User).first()
-    if not current_user:
-        raise HTTPException(status_code=404, detail="No users in database")
     
     # Verify puzzle exists
     puzzle = db.query(Puzzle).filter(Puzzle.id == payload.puzzle_id).first()
-    if not puzzle:
-        raise HTTPException(status_code=404, detail="Puzzle not found")
+    
+    # Determine grid size - default to 6 if puzzle not found
+    puzzle_size = puzzle.size if puzzle else 6
     
     # Get possible moves using function calling
-    possible_hints = get_possible_moves(payload.grid_state, puzzle.size)
+    possible_hints = get_possible_moves(payload.grid_state, puzzle_size)
     
-    if not possible_hints:
-        hint_text = "No obvious moves found. Double-check the puzzle rules!"
-    else:
-        # Use AI model to generate natural language hint
-        try:
-            hint_text = generate_hint_text(grid=payload.grid_state, hints=possible_hints)
-        except FileNotFoundError as e:
-            # Fallback if model not downloaded yet
-            hint = possible_hints[0]
-            hint_text = f"💡 Hint: Put {hint['value']} at row {hint['row'] + 1}, column {hint['col'] + 1}. "
-            hint_text += f"Reason: {hint['reason']}"
+    # Use AI model to generate natural language hint
+    try:
+        hint_text = generate_hint_text(grid=payload.grid_state, hints=possible_hints)
+    except FileNotFoundError as e:
+        # Fallback if model not downloaded yet
+        hint = possible_hints[0]
+        hint_text = f"💡 Hint: Put {hint['value']} at row {hint['row'] + 1}, column {hint['col'] + 1}. "
+        hint_text += f"Reason: {hint['reason']}"
     
-    # Save hint to database
-    ai_hint = AiHint(
-        user_id=current_user.id,
-        puzzle_id=payload.puzzle_id,
-        hint_text=hint_text,
-        created_at=datetime.utcnow()
-    )
-    db.add(ai_hint)
-    db.commit()
-    
-    return {
-        "hint": hint_text,
-        "hints_used_total": db.query(AiHint).filter(
+    # Save hint to database (only if both user and puzzle exist)
+    if current_user and puzzle:
+        ai_hint = AiHint(
+            user_id=current_user.id,
+            puzzle_id=payload.puzzle_id,
+            hint_text=hint_text,
+            created_at=datetime.utcnow()
+        )
+        db.add(ai_hint)
+        db.commit()
+        
+        hints_used = db.query(AiHint).filter(
             AiHint.user_id == current_user.id,
             AiHint.puzzle_id == payload.puzzle_id
         ).count()
+    else:
+        hints_used = 0
+    
+    return {
+        "hint": hint_text,
+        "hints_used_total": hints_used
+    }
+
+
+@router.post("/error-feedback", response_model=schemas.AiErrorFeedback)
+def get_error_feedback(
+    payload: schemas.AiErrorResponse,
+    db: Session = Depends(get_db)
+):
+    """
+    Generuje przyjazna wiadomosc od AI wyjasnniajaca bledy ktore popelnil uzytkownik.
+    Przyjmuje aktualny wyglad puzzla i liste bledow, a AI model generuje
+    przyjazna wiadomosc wyjasnniajaca jakie reguly zostaly naruszone.
+    """
+    # DISABLED FOR PRESENTATION - use first user (optional)
+    current_user = db.query(User).first()
+    
+    if not payload.errors:
+        return {
+            "message": "Great! No errors detected in this move.",
+            "errors_corrected": 0
+        }
+    
+    # Use AI model to generate natural language error feedback
+    try:
+        feedback_text = generate_error_feedback(grid=payload.grid_state, errors=payload.errors)
+    except FileNotFoundError as e:
+        # Fallback if model not downloaded yet
+        error_count = len(payload.errors)
+        feedback_text = f"Oops! Found {error_count} error(s) in your move. "
+        feedback_text += "Please check the rules: no more than 2 consecutive numbers, equal distribution, and unique rows/columns."
+    
+    return {
+        "message": feedback_text,
+        "errors_corrected": len(payload.errors)
     }
