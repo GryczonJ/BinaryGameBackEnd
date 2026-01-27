@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, ConfigDict
 from uuid import UUID
 from datetime import date, datetime
 
@@ -36,8 +36,7 @@ class UserPublic(BaseModel):
     nick: str | None = None
     avatar: str | None = None  # Base64 image data
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserProfile(BaseModel):
@@ -50,8 +49,7 @@ class UserProfile(BaseModel):
     last_login: datetime | None = None
     total_solves: int = 0
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserPublicProfile(BaseModel):
@@ -75,8 +73,7 @@ class PuzzlePublic(BaseModel):
     grid_initial: str
     created_at: datetime | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PuzzleCreate(BaseModel):
@@ -112,8 +109,7 @@ class SolvePublic(BaseModel):
     completed: bool
     created_at: datetime | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SolveResponse(BaseModel):
