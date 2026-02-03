@@ -1,12 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, date, timedelta
 import uuid
 
 from db import get_db
 import schemas
 from models.models import User, Puzzle, DailyPuzzle, StoryPuzzle
 from auth.security import get_current_user
+from puzzles import generate_binary_puzzle
+from story_levels import STORY_LEVELS
 
 router = APIRouter()
 
@@ -74,6 +76,55 @@ def delete_puzzle(
     return {"status": "deleted"}
 
 
+@router.post("/daily/generate-missing")
+def generate_missing_daily_puzzles(
+    db: Session = Depends(get_db)  # current_user: User = Depends(get_current_user)
+):
+    """Generuje brakujace daily puzzles od 2026-01-01 do dzis + 7 dni."""
+    start_date = date(2026, 1, 1)
+    end_date = date.today() + timedelta(days=7)
+
+    created = 0
+    skipped = 0
+
+    current_date = start_date
+    while current_date <= end_date:
+        exists = db.query(DailyPuzzle).filter(DailyPuzzle.date == current_date).first()
+        if exists:
+            skipped += 1
+            current_date += timedelta(days=1)
+            continue
+
+        solution, initial = generate_binary_puzzle(size=6, fullness=50)
+        puzzle = Puzzle(
+            id=str(uuid.uuid4()),
+            type="daily",
+            difficulty=3,
+            size=6,
+            grid_solution=solution,
+            grid_initial=initial,
+            created_at=datetime.utcnow()
+        )
+        db.add(puzzle)
+        db.flush()
+        daily_puzzle = DailyPuzzle(
+            date=current_date,
+            puzzle_id=puzzle.id
+        )
+        db.add(daily_puzzle)
+        created += 1
+        current_date += timedelta(days=1)
+
+    db.commit()
+    return {
+        "status": "ok",
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "created": created,
+        "skipped": skipped
+    }
+
+
 @router.post("/daily/{date}")
 def set_daily_puzzle(
     date: str,
@@ -104,6 +155,84 @@ def set_daily_puzzle(
     
     db.commit()
     return {"status": "assigned", "date": date_obj, "puzzle_id": payload.puzzle_id}
+
+
+@router.post("/story/populate")
+def populate_story_mode(
+    db: Session = Depends(get_db)  # current_user: User = Depends(get_current_user)
+):
+    """Dodaje 6 predefiniowanych poziomow story (idempotentnie)."""
+    created = 0
+    updated = 0
+    skipped = 0
+
+    for idx, level in enumerate(STORY_LEVELS, start=1):
+        story_entry = db.query(StoryPuzzle).filter(StoryPuzzle.order_index == idx).first()
+        if story_entry:
+            puzzle = db.query(Puzzle).filter(Puzzle.id == story_entry.puzzle_id).first()
+            if not puzzle:
+                puzzle = Puzzle(
+                    id=str(uuid.uuid4()),
+                    type="story",
+                    difficulty=level.difficulty,
+                    size=level.size,
+                    grid_solution=level.grid_initial,
+                    grid_initial=level.grid_initial,
+                    created_at=datetime.utcnow()
+                )
+                db.add(puzzle)
+                db.flush()
+                story_entry.puzzle_id = puzzle.id
+                updated += 1
+            else:
+                changed = False
+                if puzzle.type != "story":
+                    puzzle.type = "story"
+                    changed = True
+                if puzzle.size != level.size:
+                    puzzle.size = level.size
+                    changed = True
+                if puzzle.difficulty != level.difficulty:
+                    puzzle.difficulty = level.difficulty
+                    changed = True
+                if puzzle.grid_initial != level.grid_initial:
+                    puzzle.grid_initial = level.grid_initial
+                    changed = True
+                if puzzle.grid_solution != level.grid_initial:
+                    puzzle.grid_solution = level.grid_initial
+                    changed = True
+                if changed:
+                    updated += 1
+                else:
+                    skipped += 1
+            continue
+
+        puzzle = Puzzle(
+            id=str(uuid.uuid4()),
+            type="story",
+            difficulty=level.difficulty,
+            size=level.size,
+            grid_solution=level.grid_initial,
+            grid_initial=level.grid_initial,
+            created_at=datetime.utcnow()
+        )
+        db.add(puzzle)
+        db.flush()
+        story_puzzle = StoryPuzzle(
+            id=str(uuid.uuid4()),
+            puzzle_id=puzzle.id,
+            order_index=idx
+        )
+        db.add(story_puzzle)
+        created += 1
+
+    db.commit()
+    return {
+        "status": "ok",
+        "created": created,
+        "updated": updated,
+        "skipped": skipped
+    }
 
 
 @router.post("/story/{puzzle_id}")

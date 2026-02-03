@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, ConfigDict
+from pydantic import BaseModel, EmailStr, ConfigDict, Field
 from uuid import UUID
 from datetime import date, datetime
 
@@ -14,6 +14,7 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str
     nick: str | None = None
+    avatar_url: str | None = None
 
 
 class UserLogin(BaseModel):
@@ -29,39 +30,51 @@ class UserCheckResponse(BaseModel):
     exists: bool
     message: str | None = None
 
+class ForgotPasswordRequest(BaseModel):
+    identifier: str
+
+class ForgotPasswordResponse(BaseModel):
+    message: str
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
+
+class ChangePasswordResponse(BaseModel):
+    message: str
 
 # ==================== USER SCHEMAS ====================
 class UserPublic(BaseModel):
-    id: UUID
+    id: UUID | str
     nick: str | None = None
-    avatar: str | None = None  # Base64 image data
+    avatar_url: str | None = Field(default=None, alias="avatar")  # Base64 image data
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
 class UserProfile(BaseModel):
-    id: UUID
+    id: UUID | str
     login: str
     email: str
     nick: str | None = None
-    avatar: str | None = None  # Base64 image data
+    avatar_url: str | None = Field(default=None, alias="avatar")  # Base64 image data
     created_at: datetime | None = None
     last_login: datetime | None = None
     total_solves: int = 0
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
 class UserPublicProfile(BaseModel):
-    id: UUID
+    id: UUID | str
     nick: str | None = None
-    avatar: str | None = None  # Base64 image data
+    avatar_url: str | None = Field(default=None, alias="avatar")  # Base64 image data
     total_solves: int = 0
 
 
 class UserUpdate(BaseModel):
     nick: str | None = None
-    avatar: str | None = None  # Base64 image data
+    avatar_url: str | None = None  # Base64 image data
 
 
 # ==================== PUZZLE SCHEMAS ====================
@@ -144,8 +157,8 @@ class CalendarDay(BaseModel):
 
 # ==================== AI HINT SCHEMAS ====================
 class AiHintRequest(BaseModel):
-    puzzle_id: UUID
-    grid_state: str  # JSON string representing current grid state
+    puzzle_id: str
+    grid_state: str  # Grid string: "0/1/." rows concatenated
 
 
 class AiHintResponse(BaseModel):
@@ -155,7 +168,7 @@ class AiHintResponse(BaseModel):
 
 # ==================== ADMIN SCHEMAS ====================
 class AiErrorResponse(BaseModel):
-    grid_state: str  # JSON string of current grid state
+    grid_state: str  # Grid string: "0/1/." rows concatenated
     errors: list  # Flexible error list - can be any structure
 
 

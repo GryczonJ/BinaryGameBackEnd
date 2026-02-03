@@ -8,7 +8,7 @@ load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if not DATABASE_URL:
-    raise RuntimeError("Brak DATABASE_URL w .env / zmiennych srodowiskowych")
+    DATABASE_URL = r"mssql+pyodbc://@(localdb)\MSSQLLocalDB/BinaryGame?driver=ODBC+Driver+17+for+SQL+Server&trusted_connection=yes"
 
 engine = create_engine(
     DATABASE_URL,

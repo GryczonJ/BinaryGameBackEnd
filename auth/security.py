@@ -1,33 +1,32 @@
 from datetime import datetime, timedelta
 import secrets
-import bcrypt
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
+from passlib.context import CryptContext
 
 from db import get_db
 from models import User, Session as DbSession
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+MAX_PASSWORD_BYTES = 1024
 
 
 def hash_password(password: str) -> str:
-    """Hash a password using bcrypt."""
-    # Convert password to bytes
-    password_bytes = password.encode('utf-8')
-    # Generate salt and hash
-    salt = bcrypt.gensalt()
-    hashed = bcrypt.hashpw(password_bytes, salt)
-    # Return as string
-    return hashed.decode('utf-8')
+    if len(password.encode("utf-8")) > MAX_PASSWORD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password is too long (max 1024 bytes).",
+        )
+    return pwd_context.hash(password)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a password against a bcrypt hash."""
-    password_bytes = plain_password.encode('utf-8')
-    hashed_bytes = hashed_password.encode('utf-8')
-    return bcrypt.checkpw(password_bytes, hashed_bytes)
+    if len(plain_password.encode("utf-8")) > MAX_PASSWORD_BYTES:
+        return False
+    return pwd_context.verify(plain_password, hashed_password)
 
 def new_session_token() -> str:
     return secrets.token_urlsafe(32)

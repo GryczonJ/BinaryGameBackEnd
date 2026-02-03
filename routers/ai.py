@@ -2,6 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from datetime import datetime
 import json
+import os
+import concurrent.futures
+import random
 
 from db import get_db
 import schemas
@@ -11,6 +14,10 @@ from ai_model import generate_hint_text, generate_error_feedback
 
 router = APIRouter()
 
+AI_TIMEOUT_SECONDS = float(os.getenv("AI_TIMEOUT_SECONDS", "30.0"))
+AI_ENABLED = os.getenv("AI_ENABLED", "1").lower() not in {"0", "false", "no"}
+AI_DISABLE_TIMEOUT = os.getenv("AI_DISABLE_TIMEOUT", "0").lower() in {"1", "true", "yes"}
+
 
 def get_possible_moves(grid_state: str, size: int) -> list[dict]:
     """
@@ -18,9 +25,8 @@ def get_possible_moves(grid_state: str, size: int) -> list[dict]:
     1. If there's "0 _ 0" or "1 _ 1" pattern, fill gap with opposite number
     2. If row/column has size/2 of one number, remaining cells must be the other number
     """
-    try:
-        grid = json.loads(grid_state)
-    except:
+    grid = parse_grid_state(grid_state, size)
+    if not grid:
         return []
     
     hints = []
@@ -85,7 +91,7 @@ def get_possible_moves(grid_state: str, size: int) -> list[dict]:
                         "value": 0,
                         "reason": f"Row {row + 1} already has {half} ones, remaining cells must be 0s"
                     })
-    
+
     # Check columns
     for col in range(size):
         col_cells = [grid[row][col] for row in range(size)]
@@ -110,17 +116,100 @@ def get_possible_moves(grid_state: str, size: int) -> list[dict]:
                         "value": 0,
                         "reason": f"Column {col + 1} already has {half} ones, remaining cells must be 0s"
                     })
+
+    # Rule 3: Check for "gap X X gap" patterns (prevents 3 consecutive)
+    for row in range(size):
+        for col in range(size):
+            if grid[row][col] is None or grid[row][col] == "":
+
+                # ---- Horizontal: _ X X
+                if col <= size - 3:
+                    a = grid[row][col + 1]
+                    b = grid[row][col + 2]
+                    if a == b and a is not None and a != "":
+                        hints.append({
+                            "row": row,
+                            "col": chr(col + 65),
+                            "value": 1 - a,
+                            "reason": f"Prevents 3 consecutive {a}s in row {row + 1}"
+                        })
+                        continue
+
+                # ---- Horizontal: X X _
+                if col >= 2:
+                    a = grid[row][col - 1]
+                    b = grid[row][col - 2]
+                    if a == b and a is not None and a != "":
+                        hints.append({
+                            "row": row,
+                            "col": chr(col + 65),
+                            "value": 1 - a,
+                            "reason": f"Prevents 3 consecutive {a}s in row {row + 1}"
+                        })
+                        continue
+
+                # ---- Vertical: _ X X
+                if row <= size - 3:
+                    a = grid[row + 1][col]
+                    b = grid[row + 2][col]
+                    if a == b and a is not None and a != "":
+                        hints.append({
+                            "row": row,
+                            "col": chr(col + 65),
+                            "value": 1 - a,
+                            "reason": f"Prevents 3 consecutive {a}s in column {col + 1}"
+                        })
+                        continue
+
+                # ---- Vertical: X X _
+                if row >= 2:
+                    a = grid[row - 1][col]
+                    b = grid[row - 2][col]
+                    if a == b and a is not None and a != "":
+                        hints.append({
+                            "row": row,
+                            "col": chr(col + 65),
+                            "value": 1 - a,
+                            "reason": f"Prevents 3 consecutive {a}s in column {col + 1}"
+                        })
+                        continue
+
+    random.shuffle(hints)
     
-    # Remove duplicates (same cell might be suggested by multiple rules)
-    seen = set()
-    unique_hints = []
-    for hint in hints:
-        key = (hint["row"], hint["col"])
-        if key not in seen:
-            seen.add(key)
-            unique_hints.append(hint)
-    
-    return unique_hints[:5]  # Return top 5 hints
+    return hints
+
+
+def parse_grid_state(grid_state: str, size: int) -> list[list[int | None]] | None:
+    if not grid_state:
+        return None
+    # JSON format?
+    if grid_state.strip().startswith("["):
+        try:
+            parsed = json.loads(grid_state)
+            if isinstance(parsed, list):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+    # Flat string format "0/1/."
+    flat = grid_state.strip()
+    if size <= 0 or size * size != len(flat):
+        size = int(len(flat) ** 0.5) if flat else 0
+    if size <= 0 or size * size != len(flat):
+        return None
+    grid: list[list[int | None]] = []
+    for r in range(size):
+        row: list[int | None] = []
+        for c in range(size):
+            ch = flat[r * size + c]
+            if ch == "0":
+                row.append(0)
+            elif ch == "1":
+                row.append(1)
+            else:
+                row.append(None)
+        grid.append(row)
+    return grid
 
 
 @router.post("/hint", response_model=schemas.AiHintResponse)
@@ -146,14 +235,34 @@ def get_hint(
     # Get possible moves using function calling
     possible_hints = get_possible_moves(payload.grid_state, puzzle_size)
     
-    # Use AI model to generate natural language hint
-    try:
-        hint_text = generate_hint_text(grid=payload.grid_state, hints=possible_hints)
-    except FileNotFoundError as e:
-        # Fallback if model not downloaded yet
-        hint = possible_hints[0]
-        hint_text = f"💡 Hint: Put {hint['value']} at row {hint['row'] + 1}, column {hint['col'] + 1}. "
-        hint_text += f"Reason: {hint['reason']}"
+    # Use AI model to generate natural language hint (with optional timeout)
+    grid_for_ai = json.dumps(parse_grid_state(payload.grid_state, puzzle_size)) if payload.grid_state else payload.grid_state
+    hint_text = None
+
+    if AI_ENABLED:
+        try:
+            if AI_DISABLE_TIMEOUT:
+                hint_text = generate_hint_text(grid=grid_for_ai, hints=possible_hints)
+            else:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(generate_hint_text, grid=grid_for_ai, hints=possible_hints)
+                    hint_text = future.result(timeout=AI_TIMEOUT_SECONDS)
+        except (FileNotFoundError, concurrent.futures.TimeoutError, RuntimeError, ValueError):
+            hint_text = None
+            print("AI hint generation failed or timed out.")
+
+    if not hint_text:
+        if possible_hints:
+            hint = possible_hints[0]
+            row_num = hint["row"] + 1 if isinstance(hint.get("row"), int) else hint.get("row")
+            if isinstance(hint.get("col"), int):
+                col_label = chr(65 + hint["col"])
+            else:
+                col_label = hint.get("col")
+            hint_text = f"Hint: Put {hint['value']} at row {row_num}, column {col_label}. "
+            hint_text += f"Reason: {hint['reason']}"
+        else:
+            hint_text = "Try balancing a row or column and avoid three in a row."
     
     # Save hint to database (only if both user and puzzle exist)
     if current_user and puzzle:
@@ -198,11 +307,22 @@ def get_error_feedback(
             "errors_corrected": 0
         }
     
-    # Use AI model to generate natural language error feedback
-    try:
-        feedback_text = generate_error_feedback(grid=payload.grid_state, errors=payload.errors)
-    except FileNotFoundError as e:
-        # Fallback if model not downloaded yet
+    # Use AI model to generate natural language error feedback (with optional timeout)
+    grid_for_ai = json.dumps(parse_grid_state(payload.grid_state, 0)) if payload.grid_state else payload.grid_state
+    feedback_text = None
+
+    if AI_ENABLED:
+        try:
+            if AI_DISABLE_TIMEOUT:
+                feedback_text = generate_error_feedback(grid=grid_for_ai, errors=payload.errors)
+            else:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(generate_error_feedback, grid=grid_for_ai, errors=payload.errors)
+                    feedback_text = future.result(timeout=AI_TIMEOUT_SECONDS)
+        except (FileNotFoundError, concurrent.futures.TimeoutError, RuntimeError, ValueError):
+            print("AI error feedback generation failed or timed out.")
+            feedback_text = None
+    if not feedback_text:
         error_count = len(payload.errors)
         feedback_text = f"Oops! Found {error_count} error(s) in your move. "
         feedback_text += "Please check the rules: no more than 2 consecutive numbers, equal distribution, and unique rows/columns."

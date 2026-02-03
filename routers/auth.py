@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from datetime import datetime
+import base64
 
 from db import get_db
 import schemas
@@ -9,13 +10,47 @@ from auth.security import hash_password, verify_password, create_session, get_cu
 
 router = APIRouter()
 
+MAX_AVATAR_BYTES = 500 * 1024
+
+
+def normalize_email(value: str) -> str:
+    return value.strip().lower()
+
+
+def normalize_login(value: str) -> str:
+    return value.strip()
+
+
+def normalize_avatar(value: str | None, seed: str) -> str:
+    if value:
+        trimmed = value.strip()
+        if trimmed.startswith("data:image/") and "," in trimmed:
+            _, b64 = trimmed.split(",", 1)
+            if not b64:
+                raise HTTPException(status_code=400, detail="Invalid avatar data.")
+            approx_bytes = int(len(b64) * 3 / 4)
+            if approx_bytes > MAX_AVATAR_BYTES:
+                raise HTTPException(status_code=400, detail="Avatar is too large.")
+            return trimmed
+        raise HTTPException(status_code=400, detail="Avatar must be base64 data URL.")
+
+    # fallback svg avatar
+    initials = (seed.strip()[:2] or "BG").upper()
+    svg = f"<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><rect width='100%' height='100%' fill='#2b2b2b'/><text x='50%' y='54%' text-anchor='middle' font-family='Arial' font-size='72' fill='#ffffff'>{initials}</text></svg>"
+    encoded = base64.b64encode(svg.encode("utf-8")).decode("utf-8")
+    return f"data:image/svg+xml;base64,{encoded}"
+
 
 @router.post("/check", response_model=schemas.UserCheckResponse)
 def check_user_exists(payload: schemas.UserCheck, db: Session = Depends(get_db)):
     """Sprawdza czy uzytkownik istnieje (po email lub login)."""
-    user = db.query(User).filter(
-        (User.login == payload.identifier) | (User.email == payload.identifier)
-    ).first()
+    identifier = payload.identifier.strip()
+    if "@" in identifier:
+        email = normalize_email(identifier)
+        user = db.query(User).filter(User.email == email).first()
+    else:
+        login = normalize_login(identifier)
+        user = db.query(User).filter(User.login == login).first()
     
     if user:
         return {
@@ -32,20 +67,22 @@ def check_user_exists(payload: schemas.UserCheck, db: Session = Depends(get_db))
 @router.post("/register", response_model=schemas.Token)
 def register(payload: schemas.UserCreate, db: Session = Depends(get_db)):
     """Rejestruje nowego uzytkownika i tworzy pierwsza sesje."""
-    if db.query(User).filter(User.login == payload.login).first():
+    login = normalize_login(payload.login)
+    email = normalize_email(payload.email)
+
+    if db.query(User).filter(User.login == login).first():
         raise HTTPException(status_code=400, detail="Login zajety")
-    if db.query(User).filter(User.email == payload.email).first():
+    if db.query(User).filter(User.email == email).first():
         raise HTTPException(status_code=400, detail="Email zajety")
 
-    # Generate default avatar if not provided
-    default_avatar = f"https://ui-avatars.com/api/?name={payload.nick or payload.login}&background=random&size=200"
+    avatar = normalize_avatar(payload.avatar_url, payload.nick or login)
     
     user = User(
-        login=payload.login,
-        email=payload.email,
+        login=login,
+        email=email,
         password_hash=hash_password(payload.password),
         nick=payload.nick,
-        avatar=default_avatar,
+        avatar=avatar,
         created_at=datetime.utcnow()
     )
     db.add(user)
@@ -59,9 +96,13 @@ def register(payload: schemas.UserCreate, db: Session = Depends(get_db)):
 @router.post("/login", response_model=schemas.Token)
 def login(payload: schemas.UserLogin, db: Session = Depends(get_db)):
     """Logowanie (login lub email + haslo). Tworzy nowa sesje i zwraca token."""
-    user = db.query(User).filter(
-        (User.login == payload.login_or_email) | (User.email == payload.login_or_email)
-    ).first()
+    identifier = payload.login_or_email.strip()
+    if "@" in identifier:
+        email = normalize_email(identifier)
+        user = db.query(User).filter(User.email == email).first()
+    else:
+        login = normalize_login(identifier)
+        user = db.query(User).filter(User.login == login).first()
 
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Niepoprawne dane logowania")
@@ -97,3 +138,33 @@ def me(db: Session = Depends(get_db)):  # current_user: User = Depends(get_curre
     if not user:
         raise HTTPException(status_code=404, detail="No users in database")
     return user
+
+
+@router.post("/forgot", response_model=schemas.ForgotPasswordResponse)
+def forgot_password(payload: schemas.ForgotPasswordRequest, db: Session = Depends(get_db)):
+    identifier = payload.identifier.strip()
+    if "@" in identifier:
+        email = normalize_email(identifier)
+        user = db.query(User).filter(User.email == email).first()
+    else:
+        login = normalize_login(identifier)
+        user = db.query(User).filter(User.login == login).first()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.password_hash = hash_password("")
+    db.commit()
+    return {"message": "Password reset to empty string."}
+
+
+@router.post("/change-password", response_model=schemas.ChangePasswordResponse)
+def change_password(payload: schemas.ChangePasswordRequest, db: Session = Depends(get_db)):
+    user = db.query(User).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="No users in database")
+    if not verify_password(payload.old_password, user.password_hash):
+        raise HTTPException(status_code=400, detail="Old password incorrect")
+    user.password_hash = hash_password(payload.new_password)
+    db.commit()
+    return {"message": "Password changed."}

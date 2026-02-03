@@ -5,12 +5,11 @@ import os
 # Singleton instance of the model
 _llm = None
 
-
 def get_llm():
     """Initialize and return the LLM instance (singleton)."""
     global _llm
     if _llm is None:
-        model_path = os.getenv("AI_MODEL_PATH", "./model/gemma-2-2b-it-Q4_K_M.gguf")
+        model_path = os.getenv("AI_MODEL_PATH", "D:/BinaryGame/BinaryGameBackEnd/model/gemma-2-2b-it-Q4_K_M.gguf")
         
         if not os.path.exists(model_path):
             raise FileNotFoundError(

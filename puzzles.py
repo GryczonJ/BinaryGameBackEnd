@@ -1,5 +1,4 @@
 import random
-import json
 
 
 def generate_binary_puzzle(size: int, fullness: int):
@@ -18,7 +17,7 @@ def generate_binary_puzzle(size: int, fullness: int):
                   Recommended: 20-80 for playable puzzles
     
     Returns:
-        (solution, initial) as JSON strings
+        (solution, initial) as flat strings with 0/1/. characters
     """
     fullness = max(0, min(100, fullness))  # Clamp to 0-100
     
@@ -40,7 +39,14 @@ def generate_binary_puzzle(size: int, fullness: int):
             puzzle[r][c] = None
             emptied += 1
     
-    return json.dumps(solution), json.dumps(puzzle)
+    def flatten(grid: list[list[int | None]]) -> str:
+        return "".join(
+            "0" if cell == 0 else "1" if cell == 1 else "."
+            for row in grid
+            for cell in row
+        )
+
+    return flatten(solution), flatten(puzzle)
 
 
 def _generate_valid_solution(size: int) -> list:

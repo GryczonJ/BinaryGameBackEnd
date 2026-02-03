@@ -70,9 +70,10 @@ def get_daily_by_date(date: str, db: Session = Depends(get_db)):
 def get_random_puzzle(
     size: int = 6,
     fullness: int = 50,
+    difficulty: int | None = None,
     db: Session = Depends(get_db)
 ):
-    """Generuje i zwraca losowy puzzle (nie zapisywany na stale).
+    """Generuje i zwraca losowy puzzle (zapisany do bazy).
     
     Args:
         size: Board size (4, 6, 8, or 10). Default: 6
@@ -84,15 +85,17 @@ def get_random_puzzle(
     if not (0 <= fullness <= 100):
         raise HTTPException(status_code=400, detail="Fullness must be between 0 and 100")
     
-    # Generate puzzle using the existing puzzle generator
     solution, initial = generate_binary_puzzle(size, fullness)
-    
-    # Return as temporary puzzle (not saved to DB)
-    return schemas.PuzzlePublic(
-        id="00000000-0000-0000-0000-000000000000",  # Temporary ID
+
+    new_puzzle = Puzzle(
         type="random",
-        difficulty=0,
+        difficulty=difficulty or (size // 2),
         size=size,
+        grid_solution=solution,
         grid_initial=initial,
         created_at=datetime.utcnow()
     )
+    db.add(new_puzzle)
+    db.commit()
+    db.refresh(new_puzzle)
+    return new_puzzle
