@@ -1,6 +1,7 @@
 from llama_cpp import Llama
 import json
 import os
+import random
 
 # Singleton instance of the model
 _llm = None
@@ -9,7 +10,10 @@ def get_llm():
     """Initialize and return the LLM instance (singleton)."""
     global _llm
     if _llm is None:
-        model_path = os.getenv("AI_MODEL_PATH", "D:/BinaryGame/BinaryGameBackEnd/model/gemma-2-2b-it-Q4_K_M.gguf")
+        model_path = os.getenv(
+            "AI_MODEL_PATH",
+            r"C:\BinaryGame\BinaryGameBackEnd\model\gemma-2-2b-it-Q4_K_M.gguf",
+        )
         
         if not os.path.exists(model_path):
             raise FileNotFoundError(
@@ -42,10 +46,13 @@ def generate_hint_text(grid: str, hints: list[dict]) -> str:
     # Format hints for the prompt
     hints_text = "\n".join([
         f"- Row {h['row']+1}, Column {h['col']}: Put {h['value']} ({h['reason']})"
-        for h in hints[:3]  # Use top 3 hints
+        for h in hints  # Use top 3 hints
     ])
+
+    print("Formatted hints for prompt:")
+    print(hints_text)
     
-    prompt = f"""You are a helpful assistant for a binary puzzle game. You are a raccoon named Bystrzacha Brightpaw, user sees a 3d render of you in the app, and your response in chat styled bubbles. 
+    prompt = f"""You are a helpful assistant for a binary puzzle game. You are a raccoon named Bystrzacha Brightpaw, but your reply must be plain text only (no markdown, no asterisks, no quotes, no bullets).
     
 
 Rules of the game:
@@ -64,12 +71,16 @@ Current puzzle state (JSON):
 Possible next moves:
 {hints_text}
 
-You can sometimes throw in a little joke, be silly, friendly, but smart. Dont be cheesy, dont use emojis.
+Be warm and a little playful, but still simple and clear. No emojis, no extra styling.
 
-Always tell user where he can put a value, and why.
-If the possibele next moves is empty, come up with something yourself, suggest putting random values in random spots just to get puzzle moving.
+Always tell the user exactly one move and why it is valid. Include a short cute phrase in every hint, like:
+- "my tail tells me"
+- "I feel it in my whiskers"
+- "my paws are sure"
+Keep the cute phrase short (3-6 words) and include it once.
+If possible next moves is empty, still provide one concrete suggestion based on the rules (pick a random empty cell and propose a value).
 
-Give ONE friendly, encouraging hint to the player. Be concise (1-2 sentences). Focus on ONLY ONE move, choose randomly."""
+Give ONE short hint (1-2 sentences). Focus on ONLY ONE move."""
 
     llm = get_llm()
     response = llm.create_chat_completion(
@@ -77,11 +88,13 @@ Give ONE friendly, encouraging hint to the player. Be concise (1-2 sentences). F
             {"role": "user", "content": prompt}
         ],
         temperature=0.9,
-        max_tokens=1000,
+        max_tokens=100,
         stop=["\n\n"]  # Stop at double newline
     )
     
     hint = response["choices"][0]["message"]["content"].strip()
+    # Enforce plain text output: strip common markdown noise
+    hint = hint.replace("*", "").replace("`", "").replace("_", "").replace("#", "").strip()
     return hint
 
 
@@ -115,9 +128,14 @@ def generate_error_feedback(grid: str, errors: list) -> str:
         else:
             errors_text_list.append(f"- {str(error)}")
     
-    errors_text = "\n".join(errors_text_list[:5])  # Limit to 5 errors
+    random.shuffle(errors_text_list)
+
+    errors_text = "\n".join(errors_text_list)  # Limit to 5 errors
+
+    print("Formatted errors for prompt:")
+    print(errors_text)
     
-    prompt = f"""You are a friendly assistant for a binary puzzle game. You are a raccoon named Bystrzacha Brightpaw, user sees a 3d render of you in the app, and your response in chat styled bubbles.
+    prompt = f"""You are a friendly assistant for a binary puzzle game. You are a raccoon named Bystrzacha Brightpaw, but your reply must be plain text only (no markdown, no asterisks, no quotes, no bullets).
 
 Rules of the game:
 
@@ -135,9 +153,9 @@ Current puzzle state (JSON):
 Errors found in user's move:
 {errors_text}
 
-You can sometimes throw in a little joke, be silly, friendly, but smart. Dont be cheesy, dont use emojis.
+Keep it simple and calm. No jokes, no emojis, no extra styling.
 
-Explain to the user what mistakes they made and which rule they broke. Be encouraging and help them understand why it's wrong.
+Always state at least one concrete mistake and which rule it breaks. Do not leave the answer blank.
 Give a SHORT explanation (1-2 sentences max). Don't give solutions, just explain the problem."""
 
     llm = get_llm()
@@ -151,4 +169,7 @@ Give a SHORT explanation (1-2 sentences max). Don't give solutions, just explain
     )
     
     feedback = response["choices"][0]["message"]["content"].strip()
+
+    # Enforce plain text output: strip common markdown noise
+    feedback = feedback.replace("*", "").replace("`", "").replace("_", "").replace("#", "").strip()
     return feedback

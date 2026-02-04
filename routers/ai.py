@@ -252,17 +252,10 @@ def get_hint(
             print("AI hint generation failed or timed out.")
 
     if not hint_text:
-        if possible_hints:
-            hint = possible_hints[0]
-            row_num = hint["row"] + 1 if isinstance(hint.get("row"), int) else hint.get("row")
-            if isinstance(hint.get("col"), int):
-                col_label = chr(65 + hint["col"])
-            else:
-                col_label = hint.get("col")
-            hint_text = f"Hint: Put {hint['value']} at row {row_num}, column {col_label}. "
-            hint_text += f"Reason: {hint['reason']}"
-        else:
-            hint_text = "Try balancing a row or column and avoid three in a row."
+        hint_text = "Hmm, hats a tough one... i dunno."
+        print("AI hint: FALLBACK")
+    else:
+        print("AI hint: MODEL")
     
     # Save hint to database (only if both user and puzzle exist)
     if current_user and puzzle:
@@ -324,9 +317,10 @@ def get_error_feedback(
             feedback_text = None
     if not feedback_text:
         error_count = len(payload.errors)
-        feedback_text = f"Oops! Found {error_count} error(s) in your move. "
-        feedback_text += "Please check the rules: no more than 2 consecutive numbers, equal distribution, and unique rows/columns."
-    
+        feedback_text = f"Oops! I see you made {error_count} mistake(s). But i cannot figure out what they are..."
+        print("AI error feedback: FALLBACK")
+    else:
+        print("AI error feedback: MODEL")
     return {
         "message": feedback_text,
         "errors_corrected": len(payload.errors)
