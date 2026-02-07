@@ -1,65 +1,66 @@
-from datetime import datetime, timedelta, timezone
-from jose import jwt, JWTError
-from passlib.context import CryptContext
+from datetime import datetime, timedelta
+import secrets
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
-from models.User import User
+from passlib.context import CryptContext
 
+from db import get_db
+from models import User, Session as DbSession
 
-from db import SessionLocal, get_db
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+MAX_PASSWORD_BYTES = 1024
 
-
-
-SECRET_KEY = "TWOJ_BARDZO_TAJNY_KLUCZ_DO_JWT"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
 def hash_password(password: str) -> str:
+    if len(password.encode("utf-8")) > MAX_PASSWORD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password is too long (max 1024 bytes).",
+        )
     return pwd_context.hash(password)
 
-def verify_password(plain_password, hashed_password):
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    if len(plain_password.encode("utf-8")) > MAX_PASSWORD_BYTES:
+        return False
     return pwd_context.verify(plain_password, hashed_password)
 
-def create_access_token(data: dict):
-    to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+def new_session_token() -> str:
+    return secrets.token_urlsafe(32)
 
+def create_session(db: Session, user: User, days: int = 30) -> str:
+    token = new_session_token()
+    expires_at = datetime.utcnow() + timedelta(days=days)
 
-def get_current_user(
-    token: str = Depends(oauth2_scheme),
-    db: Session = Depends(get_db)
-):
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Nie można zweryfikować tokenu dostępu",
-        headers={"WWW-Authenticate": "Bearer"},
+    s = DbSession(
+        user_id=user.id,
+        token=token,
+        expires_at=expires_at
     )
+    db.add(s)
+    db.commit()
+    return token
 
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        if email is None:
-            raise credentials_exception
-    except JWTError:
-        raise credentials_exception
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
+    now = datetime.utcnow()
 
-    user = db.query(User).filter(User.email == email).first()
-    if user is None:
-        raise credentials_exception
+    sess = db.query(DbSession).filter(
+        DbSession.token == token,
+        DbSession.expires_at > now
+    ).first()
+
+    if not sess:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired session token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user = db.query(User).filter(User.id == sess.user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
 
     return user
-
-
-def admin_required(current_user: User = Depends(get_current_user)):
-    if current_user.role != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Brak uprawnień administratora"
-        )
-    return current_user
